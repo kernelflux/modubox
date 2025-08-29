@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.kernelflux.moduboxsample.annotation"
+    namespace = "com.kernelflux.modubox.annotation"
 }
 
 dependencies {

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.kernelflux.moduboxsample.plugin.api"
+    namespace = "com.kernelflux.modubox.plugin.api"
 }
 
 dependencies {

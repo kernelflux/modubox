@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.kernelflux.moduboxsample.feature.login"
+    namespace = "com.kernelflux.modubox.feature.login"
 }
 
 dependencies {
