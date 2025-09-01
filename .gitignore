@@ -11,3 +11,4 @@ private.properties
 # keystore files
 *.jks
 keystore.properties
+*.md

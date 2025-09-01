@@ -129,6 +129,11 @@ class AndroidModuleConventionPlugin : Plugin<Project> {
                     proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
                     proguardFiles(project.file("proguard-rules.pro"))
                 }
+                debug {
+                    isMinifyEnabled = false
+                    proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+                    proguardFiles(project.file("proguard-rules.pro"))
+                }
             }
 
             compileOptions {
@@ -170,11 +175,6 @@ class AndroidModuleConventionPlugin : Plugin<Project> {
                 buildConfig = true
             }
 
-            publishing {
-                singleVariant("release") {
-                    withSourcesJar()
-                }
-            }
         }
     }
 
