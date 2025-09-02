@@ -14,8 +14,17 @@ import com.kernelflux.modubox.core.api.RouterManager
  */
 @RouteInterceptor(
     name = "PermissionInterceptor",
+    description = "检查应用权限",
     priority = 90,
-    global = false
+    group = "permission",
+    global = false,
+    patterns = ["/camera/*", "/location/*", "/storage/*"],
+    excludes = [],
+    async = false,
+    timeout = 3000,
+    enabled = true,
+    tags = ["permission", "security"],
+    hotReload = false
 )
 class PermissionInterceptor(
     private val context: Context

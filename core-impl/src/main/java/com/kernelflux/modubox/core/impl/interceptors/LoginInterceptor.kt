@@ -10,8 +10,17 @@ import com.kernelflux.modubox.core.api.RouterManager
  */
 @RouteInterceptor(
     name = "LoginInterceptor",
+    description = "检查用户登录状态",
     priority = 100,
-    global = true
+    group = "auth",
+    global = true,
+    patterns = ["/profile/*", "/order/*", "/payment/*"],
+    excludes = [],
+    async = false,
+    timeout = 3000,
+    enabled = true,
+    tags = ["auth", "login"],
+    hotReload = false
 )
 class LoginInterceptor : RouterManager.Interceptor {
     

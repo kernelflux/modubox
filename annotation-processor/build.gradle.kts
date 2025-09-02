@@ -13,19 +13,16 @@ java {
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        jvmTarget = "1.8"
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
     }
 }
 
 dependencies {
     implementation(project(":annotation"))
     implementation(libs.auto.service)
-    implementation(libs.javapoet)
-    
-    // KSP依赖 - 使用硬编码版本确保兼容性
-    implementation("com.google.devtools.ksp:symbol-processing-api:2.0.21-1.0.28")
-    
-    // Kotlin依赖
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
+    implementation(libs.kotlinpoet)
+    implementation(libs.kotlinpoet.ksp)
+    implementation(libs.ksp.api)
+    implementation(libs.kotlin.stdlib)
 }

@@ -1,19 +1,34 @@
 package com.kernelflux.modubox.processor
 
-import com.google.devtools.ksp.processing.*
+import com.google.devtools.ksp.processing.CodeGenerator
+import com.google.devtools.ksp.processing.Dependencies
+import com.google.devtools.ksp.processing.KSPLogger
+import com.google.devtools.ksp.processing.Resolver
+import com.google.devtools.ksp.processing.SymbolProcessor
+import com.google.devtools.ksp.processing.SymbolProcessorEnvironment
+import com.google.devtools.ksp.processing.SymbolProcessorProvider
 import com.google.devtools.ksp.symbol.*
 import com.kernelflux.modubox.annotation.*
 import com.kernelflux.modubox.processor.generator.*
 import com.kernelflux.modubox.processor.model.*
+import com.squareup.kotlinpoet.*
+import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 
 /**
  * ModuBox KSP注解处理器
- * 参考大厂主流技术方案，支持大型组件化App
+ * 负责处理所有ModuBox相关的注解并生成相应的代码
  */
 class ModuBoxProcessor(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger
 ) : SymbolProcessor {
+    
+    companion object {
+        private val MAP_STRING_ANY = Map::class.asTypeName().parameterizedBy(
+            String::class.asTypeName(),
+            Any::class.asTypeName()
+        )
+    }
     
     private val pluginInfos = mutableListOf<PluginInfo>()
     private val routeInfos = mutableListOf<RouteInfo>()
@@ -21,7 +36,7 @@ class ModuBoxProcessor(
     private val serviceInfos = mutableListOf<ServiceInfo>()
     private val moduleInfos = mutableListOf<ModuleInfo>()
     private val componentInfos = mutableListOf<ComponentInfo>()
-    private val providesInfos = mutableListOf<ProvidesInfo>()
+
     
     override fun process(resolver: Resolver): List<KSAnnotated> {
         // 处理所有注解
@@ -64,10 +79,7 @@ class ModuBoxProcessor(
             .filterIsInstance<KSClassDeclaration>()
             .forEach { processComponent(it) }
         
-        // 处理@Provides注解
-        resolver.getSymbolsWithAnnotation(Provides::class.qualifiedName!!)
-            .filterIsInstance<KSFunctionDeclaration>()
-            .forEach { processProvides(it) }
+
     }
     
     private fun processPlugin(symbol: KSClassDeclaration) {
@@ -130,7 +142,7 @@ class ModuBoxProcessor(
         val interceptorInfo = RouteInterceptorInfo(
             className = symbol.qualifiedName?.asString() ?: "",
             simpleName = symbol.simpleName.asString(),
-            name = arguments["name"] as? String ?: "",
+            name = arguments["name"] as? String ?: symbol.simpleName.asString(),
             description = arguments["description"] as? String ?: "",
             priority = arguments["priority"] as? Int ?: 0,
             group = arguments["group"] as? String ?: "",
@@ -138,14 +150,14 @@ class ModuBoxProcessor(
             patterns = (arguments["patterns"] as? Array<*>)?.mapNotNull { it as? String } ?: emptyList(),
             excludes = (arguments["excludes"] as? Array<*>)?.mapNotNull { it as? String } ?: emptyList(),
             async = arguments["async"] as? Boolean ?: false,
-            timeout = arguments["timeout"] as? Long ?: 3000,
+            timeout = arguments["timeout"] as? Long ?: 0L,
             enabled = arguments["enabled"] as? Boolean ?: true,
             tags = (arguments["tags"] as? Array<*>)?.mapNotNull { it as? String } ?: emptyList(),
             hotReload = arguments["hotReload"] as? Boolean ?: false
         )
         
         routeInterceptorInfos.add(interceptorInfo)
-        logger.info("Found route interceptor: ${interceptorInfo.name}")
+        logger.info("Found route interceptor: ${interceptorInfo.patterns}")
     }
     
     private fun processService(symbol: KSClassDeclaration) {
@@ -155,8 +167,8 @@ class ModuBoxProcessor(
         val serviceInfo = ServiceInfo(
             className = symbol.qualifiedName?.asString() ?: "",
             simpleName = symbol.simpleName.asString(),
-            name = (arguments["name"] as? String)?.ifEmpty { symbol.simpleName.asString() } ?: symbol.simpleName.asString(),
-            singleton = arguments["singleton"] as? Boolean ?: true
+            name = arguments["name"] as? String ?: symbol.simpleName.asString(),
+            singleton = arguments["singleton"] as? Boolean ?: false
         )
         
         serviceInfos.add(serviceInfo)
@@ -170,12 +182,12 @@ class ModuBoxProcessor(
         val moduleInfo = ModuleInfo(
             className = symbol.qualifiedName?.asString() ?: "",
             simpleName = symbol.simpleName.asString(),
-            name = arguments["name"] as? String ?: "",
+            name = arguments["name"] as? String ?: symbol.simpleName.asString(),
             description = arguments["description"] as? String ?: "",
             priority = arguments["priority"] as? Int ?: 0,
-            singleton = arguments["singleton"] as? Boolean ?: true,
+            singleton = arguments["singleton"] as? Boolean ?: false,
             dependencies = (arguments["dependencies"] as? Array<*>)?.mapNotNull { it as? String } ?: emptyList(),
-            scope = arguments["scope"] as? String ?: "Application",
+            scope = arguments["scope"] as? String ?: "singleton",
             lazy = arguments["lazy"] as? Boolean ?: false,
             hotReload = arguments["hotReload"] as? Boolean ?: false
         )
@@ -191,12 +203,12 @@ class ModuBoxProcessor(
         val componentInfo = ComponentInfo(
             className = symbol.qualifiedName?.asString() ?: "",
             simpleName = symbol.simpleName.asString(),
-            name = arguments["name"] as? String ?: "",
+            name = arguments["name"] as? String ?: symbol.simpleName.asString(),
             description = arguments["description"] as? String ?: "",
-            scope = arguments["scope"] as? String ?: "Application",
+            scope = arguments["scope"] as? String ?: "singleton",
             modules = (arguments["modules"] as? Array<*>)?.mapNotNull { it as? String } ?: emptyList(),
             dependencies = (arguments["dependencies"] as? Array<*>)?.mapNotNull { it as? String } ?: emptyList(),
-            singleton = arguments["singleton"] as? Boolean ?: true,
+            singleton = arguments["singleton"] as? Boolean ?: false,
             lazy = arguments["lazy"] as? Boolean ?: false,
             hotReload = arguments["hotReload"] as? Boolean ?: false,
             priority = arguments["priority"] as? Int ?: 0
@@ -206,181 +218,140 @@ class ModuBoxProcessor(
         logger.info("Found component: ${componentInfo.name}")
     }
     
-    private fun processProvides(symbol: KSFunctionDeclaration) {
-        val annotation = symbol.annotations.first { it.shortName.asString() == "Provides" }
-        val arguments = annotation.arguments.associate { it.name?.asString() to it.value }
-        
-        val providesInfo = ProvidesInfo(
-            className = symbol.parentDeclaration?.qualifiedName?.asString() ?: "",
-            methodName = symbol.simpleName.asString(),
-            name = arguments["name"] as? String ?: "",
-            singleton = arguments["singleton"] as? Boolean ?: true,
-            scope = arguments["scope"] as? String ?: "Application",
-            priority = arguments["priority"] as? Int ?: 0,
-            lazy = arguments["lazy"] as? Boolean ?: false,
-            condition = arguments["condition"] as? String ?: "",
-            hotReload = arguments["hotReload"] as? Boolean ?: false,
-            returnType = symbol.returnType?.resolve()?.declaration?.qualifiedName?.asString() ?: ""
-        )
-        
-        providesInfos.add(providesInfo)
-        logger.info("Found provides: ${providesInfo.methodName}")
-    }
+
     
     private fun generateCode() {
-        try {
-            if (hasAnyAnnotations()) {
-                generateSpecializedRegistries()
-                generateMainRegistry()
-            }
-        } catch (e: Exception) {
-            logger.error("Failed to generate code: ${e.message}")
+        if (!hasAnyAnnotations()) {
+            logger.info("No ModuBox annotations found, skipping code generation")
+            return
         }
-    }
-    
-    private fun generateSpecializedRegistries() {
-        // 生成专门的注册器
+        
+        // 生成各个注册器
         PluginGenerator().generate(codeGenerator, pluginInfos)
         RouteGenerator().generate(codeGenerator, routeInfos)
         InterceptorGenerator().generate(codeGenerator, routeInterceptorInfos)
         ServiceGenerator().generate(codeGenerator, serviceInfos)
         ModuleGenerator().generate(codeGenerator, moduleInfos)
         ComponentGenerator().generate(codeGenerator, componentInfos)
+        
+        // 生成主注册器
+        generateMainRegistry()
     }
     
     private fun generateMainRegistry() {
-        val content = buildString {
-            appendLine("package com.kernelflux.modubox.registry;")
-            appendLine()
-            appendLine("import com.kernelflux.modubox.core.api.ModuBox;")
-            appendLine("import java.util.Map;")
-            appendLine("import java.util.HashMap;")
-            appendLine()
-            appendLine("/**")
-            appendLine(" * ModuBox统一注册入口")
-            appendLine(" * 由KSP注解处理器自动生成，请勿手动修改")
-            appendLine(" */")
-            appendLine("public class ModuBoxRegistry {")
-            appendLine()
-            
-            // 生成统一注册方法
-            append(generateUnifiedRegisterMethod())
-            appendLine()
-            
-            // 生成统一信息获取方法
-            append(generateUnifiedInfoMethod())
-            appendLine()
-            
-            appendLine("}")
-        }
+        val registryClass = TypeSpec.classBuilder("ModuBoxRegistry")
+            .addModifiers(KModifier.PUBLIC)
+            .addFunction(generateUnifiedRegisterMethod())
+            .addFunction(generateUnifiedInfoMethod())
+            .build()
         
-        val fileSpec = codeGenerator.createNewFile(
+        val fileSpec = FileSpec.builder("com.kernelflux.modubox.registry", "ModuBoxRegistry")
+            .addType(registryClass)
+            .build()
+        
+        val kspFile = codeGenerator.createNewFile(
             dependencies = Dependencies.ALL_FILES,
             packageName = "com.kernelflux.modubox.registry",
             fileName = "ModuBoxRegistry"
         )
         
-        fileSpec.writer().use { writer ->
-            writer.write(content)
+        kspFile.writer().use { writer ->
+            fileSpec.writeTo(writer)
         }
     }
     
-    private fun generateUnifiedRegisterMethod(): String {
-        val body = buildString {
-            if (pluginInfos.isNotEmpty()) {
-                appendLine("        // 注册插件")
-                appendLine("        PluginRegistry.registerPlugins(moduBox);")
-            }
-            
-            if (routeInfos.isNotEmpty()) {
-                appendLine("        // 注册路由")
-                appendLine("        RouteRegistry.registerRoutes(moduBox);")
-            }
-            
-            if (routeInterceptorInfos.isNotEmpty()) {
-                appendLine("        // 注册拦截器")
-                appendLine("        InterceptorRegistry.registerInterceptors(moduBox);")
-            }
-            
-            if (serviceInfos.isNotEmpty()) {
-                appendLine("        // 注册服务")
-                appendLine("        ServiceRegistry.registerServices(moduBox);")
-            }
-            
-            if (moduleInfos.isNotEmpty()) {
-                appendLine("        // 注册模块")
-                appendLine("        ModuleRegistry.registerModules(moduBox);")
-            }
-            
-            if (componentInfos.isNotEmpty()) {
-                appendLine("        // 注册组件")
-                appendLine("        ComponentRegistry.registerComponents(moduBox);")
-            }
+    private fun generateUnifiedRegisterMethod(): FunSpec {
+        val body = CodeBlock.builder()
+        
+        if (pluginInfos.isNotEmpty()) {
+            body.addStatement("// 注册插件")
+            body.addStatement("PluginRegistry.registerPlugins(moduBox)")
         }
         
-        return buildString {
-            appendLine("    /**")
-            appendLine("     * 执行所有注册")
-            appendLine("     */")
-            appendLine("    public static void registerAll(ModuBox moduBox) {")
-            append(body)
-            appendLine("    }")
+        if (routeInfos.isNotEmpty()) {
+            body.addStatement("// 注册路由")
+            body.addStatement("RouteRegistry.registerRoutes(moduBox)")
         }
+        
+        if (routeInterceptorInfos.isNotEmpty()) {
+            body.addStatement("// 注册拦截器")
+            body.addStatement("InterceptorRegistry.registerInterceptors(moduBox)")
+        }
+        
+        if (serviceInfos.isNotEmpty()) {
+            body.addStatement("// 注册服务")
+            body.addStatement("ServiceRegistry.registerServices(moduBox)")
+        }
+        
+        if (moduleInfos.isNotEmpty()) {
+            body.addStatement("// 注册模块")
+            body.addStatement("ModuleRegistry.registerModules(moduBox)")
+        }
+        
+        if (componentInfos.isNotEmpty()) {
+            body.addStatement("// 注册组件")
+            body.addStatement("ComponentRegistry.registerComponents(moduBox)")
+        }
+        
+        return FunSpec.builder("registerAll")
+            .addModifiers(KModifier.PUBLIC)
+            .addModifiers(KModifier.OVERRIDE)
+            .addParameter("moduBox", ClassName("com.kernelflux.modubox.core.api", "ModuBox"))
+            .addCode(body.build())
+            .build()
     }
     
-    private fun generateUnifiedInfoMethod(): String {
-        val body = buildString {
-            appendLine("        Map<String, Object> info = new HashMap<>();")
-            appendLine()
-            
-            if (pluginInfos.isNotEmpty()) {
-                appendLine("        // 插件信息")
-                appendLine("        info.put(\"plugins\", PluginRegistry.getPluginInfo());")
-            }
-            
-            if (routeInfos.isNotEmpty()) {
-                appendLine("        // 路由信息")
-                appendLine("        info.put(\"routes\", RouteRegistry.getRouteInfo());")
-            }
-            
-            if (routeInterceptorInfos.isNotEmpty()) {
-                appendLine("        // 拦截器信息")
-                appendLine("        info.put(\"interceptors\", InterceptorRegistry.getInterceptorInfo());")
-            }
-            
-            if (serviceInfos.isNotEmpty()) {
-                appendLine("        // 服务信息")
-                appendLine("        info.put(\"services\", ServiceRegistry.getServiceInfo());")
-            }
-            
-            if (moduleInfos.isNotEmpty()) {
-                appendLine("        // 模块信息")
-                appendLine("        info.put(\"modules\", ModuleRegistry.getModuleInfo());")
-            }
-            
-            if (componentInfos.isNotEmpty()) {
-                appendLine("        // 组件信息")
-                appendLine("        info.put(\"components\", ComponentRegistry.getComponentInfo());")
-            }
-            
-            appendLine()
-            appendLine("        return info;")
+    private fun generateUnifiedInfoMethod(): FunSpec {
+        val body = CodeBlock.builder()
+            .addStatement("val info = mutableMapOf<String, Any>()")
+            .addStatement("")
+        
+        if (pluginInfos.isNotEmpty()) {
+            body.addStatement("// 插件信息")
+            body.addStatement("info[\"plugins\"] = PluginRegistry.getPluginInfo()")
         }
         
-        return buildString {
-            appendLine("    /**")
-            appendLine("     * 获取注册信息")
-            appendLine("     */")
-            appendLine("    public static Map<String, Object> getRegistrationInfo() {")
-            append(body)
-            appendLine("    }")
+        if (routeInfos.isNotEmpty()) {
+            body.addStatement("// 路由信息")
+            body.addStatement("info[\"routes\"] = RouteRegistry.getRouteInfo()")
         }
+        
+        if (routeInterceptorInfos.isNotEmpty()) {
+            body.addStatement("// 拦截器信息")
+            body.addStatement("info[\"interceptors\"] = InterceptorRegistry.getInterceptorInfo()")
+        }
+        
+        if (serviceInfos.isNotEmpty()) {
+            body.addStatement("// 服务信息")
+            body.addStatement("info[\"services\"] = ServiceRegistry.getServiceInfo()")
+        }
+        
+        if (moduleInfos.isNotEmpty()) {
+            body.addStatement("// 模块信息")
+            body.addStatement("info[\"modules\"] = ModuleRegistry.getModuleInfo()")
+        }
+        
+        if (componentInfos.isNotEmpty()) {
+            body.addStatement("// 组件信息")
+            body.addStatement("info[\"components\"] = ComponentRegistry.getComponentInfo()")
+        }
+        
+        body.addStatement("")
+        body.addStatement("return info")
+        
+        return FunSpec.builder("getRegistrationInfo")
+            .addModifiers(KModifier.PUBLIC)
+            .addModifiers(KModifier.OVERRIDE)
+            .returns(MAP_STRING_ANY)
+            .addCode(body.build())
+            .build()
     }
     
     private fun hasAnyAnnotations(): Boolean {
         return pluginInfos.isNotEmpty() || routeInfos.isNotEmpty() || routeInterceptorInfos.isNotEmpty() || 
                serviceInfos.isNotEmpty() || moduleInfos.isNotEmpty() || componentInfos.isNotEmpty()
     }
+
 }
 
 /**

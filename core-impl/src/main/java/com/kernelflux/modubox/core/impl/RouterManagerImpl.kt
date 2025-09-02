@@ -86,7 +86,7 @@ class RouterManagerImpl : RouterManager {
                     is CharArray -> putExtra(key, value)
                     is ByteArray -> putExtra(key, value)
                     is ShortArray -> putExtra(key, value)
-                    is CharSequenceArray -> putExtra(key, value)
+                    is Array<*> -> putExtra(key, value)
                     is ArrayList<*> -> putExtra(key, value)
                     else -> putExtra(key, value.toString())
                 }
